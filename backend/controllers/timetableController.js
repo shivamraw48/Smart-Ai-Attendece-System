@@ -24,6 +24,28 @@ const addClass = async (req, res) => {
         res.status(500).json({ message: 'Server Error' });
     }
 };
+ // Make sure your model is imported
+
+// @desc    Delete a scheduled class
+// @route   DELETE /api/timetable/:id
+// @access  Private (Teacher)
+const deleteClass = async (req, res) => {
+    try {
+        const classId = req.params.id;
+
+        // Find the class by ID and delete it
+        const deletedClass = await Timetable.findByIdAndDelete(classId);
+
+        if (!deletedClass) {
+            return res.status(404).json({ message: 'Class not found' });
+        }
+
+        res.status(200).json({ message: 'Class deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting class:', error);
+        res.status(500).json({ message: 'Server Error while deleting class' });
+    }
+};
 
 // @desc    Get the timetable for a specific batch
 // @route   GET /api/timetable/:batch
@@ -41,4 +63,4 @@ const getTimetableByBatch = async (req, res) => {
     }
 };
 
-module.exports = { addClass, getTimetableByBatch };
+module.exports = { addClass, getTimetableByBatch, deleteClass };

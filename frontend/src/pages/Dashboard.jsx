@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { Calendar, Users, CheckCircle, Clock, AlertCircle, Download, Plus, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('attendance'); 
+  const [activeTab, setActiveTab] = useState('attendance');
   const [teacherEmail, setTeacherEmail] = useState('');
 
   // --- ATTENDANCE STATE ---
@@ -12,17 +14,18 @@ const Dashboard = () => {
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [stats, setStats] = useState({ total: 0, present: 0, absent: 0 });
 
   // --- TIMETABLE STATE ---
   const [schedule, setSchedule] = useState([]);
   const [timetableMsg, setTimetableMsg] = useState('');
   const [newClass, setNewClass] = useState({ subject: '', batch: 'A', day: 'Monday', start: '', end: '' });
+  const [classToDelete, setClassToDelete] = useState(null);
 
   // --- SECURITY CHECK ON LOAD ---
   useEffect(() => {
     const token = localStorage.getItem('teacherToken');
     if (!token) {
-      // If no wristband, kick them to the login page!
       navigate('/login');
     } else {
       setTeacherEmail(localStorage.getItem('teacherEmail'));
@@ -34,8 +37,8 @@ const Dashboard = () => {
     const token = localStorage.getItem('teacherToken');
     return {
       headers: {
-        Authorization: `Bearer ${token}` // Show the wristband to the Bouncer
-      }
+        Authorization: `Bearer ${token}`,
+      },
     };
   };
 
@@ -43,12 +46,22 @@ const Dashboard = () => {
   const fetchAttendance = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`http://localhost:5000/api/attendance/batch/${batch}`, getAuthHeaders());
+      const response = await axios.get(
+        `http://localhost:5000/api/attendance/batch/${batch}`,
+        getAuthHeaders()
+      );
       setAttendanceRecords(response.data.data);
+
+      // Calculate stats
+      const total = response.data.data.length;
+      const present = response.data.data.length;
+      const absent = Math.max(0, total - present);
+
+      setStats({ total, present, absent });
       setError('');
     } catch (err) {
-      if (err.response?.status === 401) handleLogout(); // Token expired!
-      setError('Failed to fetch attendance data. ' + (err.response?.data?.message || ''));
+      if (err.response?.status === 401) handleLogout();
+      setError('Failed to fetch attendance data');
     }
     setLoading(false);
   };
@@ -56,11 +69,14 @@ const Dashboard = () => {
   // Fetch Timetable (Secured)
   const fetchTimetable = async () => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/timetable/${batch}`, getAuthHeaders());
+      const response = await axios.get(
+        `http://localhost:5000/api/timetable/${batch}`,
+        getAuthHeaders()
+      );
       setSchedule(response.data);
     } catch (err) {
       if (err.response?.status === 401) handleLogout();
-      console.error("Error fetching schedule", err);
+      console.error('Error fetching schedule', err);
     }
   };
 
@@ -76,12 +92,29 @@ const Dashboard = () => {
     setTimetableMsg('Saving...');
     try {
       await axios.post('http://localhost:5000/api/timetable', newClass, getAuthHeaders());
-      setTimetableMsg('✅ Class added successfully!');
-      setNewClass({ ...newClass, subject: '', start: '', end: '' }); 
-      fetchTimetable(); 
-      setTimeout(() => setTimetableMsg(''), 3000);
+      toast.success('✅ Class added successfully!');
+      setTimetableMsg('');
+      setNewClass({ subject: '', batch: 'A', day: 'Monday', start: '', end: '' });
+      fetchTimetable();
     } catch (err) {
-      setTimetableMsg('❌ Error adding class.');
+      toast.error('❌ Error adding class');
+      setTimetableMsg('');
+    }
+  };
+
+  // Handle Deleting a Class (Secured)
+  const handleDeleteClass = async () => {
+    if (!classToDelete) return;
+    
+    try {
+      await axios.delete(`http://localhost:5000/api/timetable/${classToDelete}`, getAuthHeaders());
+      toast.success('✅ Class deleted successfully!');
+      fetchTimetable(); // Refresh the list after deleting
+    } catch (err) {
+      toast.error('❌ Error deleting class');
+      console.error('Error deleting class', err);
+    } finally {
+      setClassToDelete(null);
     }
   };
 
@@ -92,115 +125,320 @@ const Dashboard = () => {
     navigate('/login');
   };
 
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
-      
-      {/* Top Header with Logout */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', padding: '10px 20px', backgroundColor: '#e3f2fd', borderRadius: '10px' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '24px' }}>👨‍🏫 Teacher Dashboard</h1>
-          <p style={{ margin: 0, color: '#555', fontSize: '14px' }}>Logged in as: <strong>{teacherEmail}</strong></p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="container-max py-8">
+        {/* Header */}
+        <div className="flex justify-between items-start mb-8">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2 flex items-center gap-3">
+              <div className="bg-gradient-primary rounded-lg p-2">
+                <Users className="text-white" size={32} />
+              </div>
+              Teacher Dashboard
+            </h1>
+            <p className="text-slate-600">
+              Logged in as: <span className="font-semibold text-primary-600">{teacherEmail}</span>
+            </p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="btn btn-outline text-red-600 border-red-600 hover:bg-red-50"
+          >
+            Logout
+          </button>
         </div>
-        <button onClick={handleLogout} style={{ padding: '8px 15px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}>
-          Logout
-        </button>
-      </div>
 
-      {/* Tab Navigation */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '30px' }}>
-        <button onClick={() => setActiveTab('attendance')} style={{ padding: '10px 20px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '5px', backgroundColor: activeTab === 'attendance' ? '#4CAF50' : '#ddd', color: activeTab === 'attendance' ? 'white' : 'black', border: 'none' }}>📋 View Attendance</button>
-        <button onClick={() => setActiveTab('timetable')} style={{ padding: '10px 20px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '5px', backgroundColor: activeTab === 'timetable' ? '#2196F3' : '#ddd', color: activeTab === 'timetable' ? 'white' : 'black', border: 'none' }}>📅 Manage Timetable</button>
-      </div>
+        {/* Tab Navigation */}
+        <div className="flex gap-4 mb-8 border-b border-slate-200">
+          {[
+            { id: 'attendance', label: '📋 Attendance', icon: '📋' },
+            { id: 'timetable', label: '📅 Timetable', icon: '📅' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-6 py-3 font-semibold transition-all border-b-2 ${
+                activeTab === tab.id
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-      {/* Batch Selector (Used for both tabs) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '20px', justifyContent: 'center' }}>
-        <label style={{ fontSize: '18px', fontWeight: 'bold' }}>Select Target Batch:</label>
-        <select value={batch} onChange={(e) => setBatch(e.target.value)} style={{ padding: '10px', fontSize: '16px', borderRadius: '5px' }}>
-          <option value="A">Batch A</option>
-          <option value="B">Batch B</option>
-          <option value="C">Batch C</option>
-          <option value="D">Batch D</option>
-        </select>
-      </div>
+        {/* --- ATTENDANCE TAB --- */}
+        {activeTab === 'attendance' && (
+          <div className="space-y-6">
+            {/* Batch Selector */}
+            <div className="flex items-center gap-4 bg-white rounded-lg p-4 shadow-sm-soft">
+              <label className="font-semibold text-slate-900">Select Batch:</label>
+              <select
+                value={batch}
+                onChange={(e) => setBatch(e.target.value)}
+                className="input w-48"
+              >
+                <option value="A">Batch A</option>
+                <option value="B">Batch B</option>
+                <option value="C">Batch C</option>
+                <option value="D">Batch D</option>
+              </select>
 
-      {/* --- TAB 1: ATTENDANCE VIEWER --- */}
-      {activeTab === 'attendance' && (
-        <div>
-          {loading ? <p style={{textAlign: 'center'}}>Loading...</p> : error ? <p style={{color:'red', textAlign:'center'}}>{error}</p> : attendanceRecords.length === 0 ? (
-            <div style={{ padding: '30px', textAlign: 'center', backgroundColor: '#f9f9f9', borderRadius: '10px' }}>
-              <h3>No attendance records found for Batch {batch} today.</h3>
+              <button className="ml-auto btn btn-primary flex items-center gap-2">
+                <Download size={18} />
+                Export as CSV
+              </button>
             </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', boxShadow: '0px 4px 10px rgba(0,0,0,0.1)' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#282c34', color: 'white', textAlign: 'left' }}>
-                  <th style={{ padding: '12px' }}>Name</th>
-                  <th style={{ padding: '12px' }}>PRN</th>
-                  <th style={{ padding: '12px' }}>Subject</th>
-                  <th style={{ padding: '12px' }}>Date</th> {/* NEW COLUMN */}
-                  <th style={{ padding: '12px' }}>Time Marked</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attendanceRecords.map((record, index) => (
-                  <tr key={index} style={{ borderBottom: '1px solid #ddd', backgroundColor: index % 2 === 0 ? '#fff' : '#f9f9f9' }}>
-                    <td style={{ padding: '12px', fontWeight: 'bold' }}>{record.name}</td>
-                    <td style={{ padding: '12px' }}>{record.prn}</td>
-                    <td style={{ padding: '12px' }}>{record.subject}</td>
-                    {/* Display the actual Date alongside the time */}
-                    <td style={{ padding: '12px' }}>{new Date().toLocaleDateString()}</td> 
-                    <td style={{ padding: '12px', color: 'green', fontWeight: 'bold' }}>{record.timeMarked}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
 
-      {/* --- TAB 2: TIMETABLE MANAGER --- */}
-      {activeTab === 'timetable' && (
-        <div style={{ padding: '20px', backgroundColor: '#f4f4f4', borderRadius: '10px' }}>
-          <h2>Add New Class</h2>
-          <form onSubmit={handleAddClass} style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', marginTop: '15px' }}>
-            <input type="text" placeholder="Subject Name" required value={newClass.subject} onChange={(e) => setNewClass({...newClass, subject: e.target.value})} style={{ padding: '10px', flex: '1' }} />
-            
-            <select value={newClass.batch} onChange={(e) => setNewClass({...newClass, batch: e.target.value})} style={{ padding: '10px' }}>
-              <option value="A">Batch A</option>
-              <option value="B">Batch B</option>
-              <option value="C">Batch C</option>
-              <option value="D">Batch D</option>
-            </select>
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="card bg-green-50 border-0">
+                <p className="text-sm text-slate-600 mb-1">Present</p>
+                <p className="text-2xl font-bold text-green-600">{stats.present}</p>
+              </div>
+              <div className="card bg-red-50 border-0">
+                <p className="text-sm text-slate-600 mb-1">Absent</p>
+                <p className="text-2xl font-bold text-red-600">{stats.absent}</p>
+              </div>
+              <div className="card bg-blue-50 border-0">
+                <p className="text-sm text-slate-600 mb-1">Attendance Rate</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
+                </p>
+              </div>
+            </div>
 
-            {/* NEW DAY DROPDOWN */}
-            <select value={newClass.day} onChange={(e) => setNewClass({...newClass, day: e.target.value})} style={{ padding: '10px' }}>
-              <option value="Monday">Monday</option>
-              <option value="Tuesday">Tuesday</option>
-              <option value="Wednesday">Wednesday</option>
-              <option value="Thursday">Thursday</option>
-              <option value="Friday">Friday</option>
-              <option value="Saturday">Saturday</option>
-              <option value="Sunday">Sunday</option>
-            </select>
+            {/* Attendance Table */}
+            {loading ? (
+              <div className="card text-center py-12">
+                <p className="text-slate-600">Loading attendance records...</p>
+              </div>
+            ) : error ? (
+              <div className="card bg-red-50 border border-red-200">
+                <p className="text-red-600">{error}</p>
+              </div>
+            ) : attendanceRecords.length === 0 ? (
+              <div className="card text-center py-12">
+                <AlertCircle className="mx-auto mb-4 text-slate-400" size={40} />
+                <p className="text-slate-600">No attendance records found for Batch {batch} today</p>
+              </div>
+            ) : (
+              <div className="card overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50">
+                      <th className="text-left px-4 py-3 font-semibold text-slate-700">Name</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-700">PRN</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-700">Subject</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-700">Date & Day</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-700">Time Marked</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-700">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendanceRecords.map((record, idx) => (
+                      <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-slate-900">{record.name}</td>
+                        <td className="px-4 py-3 text-slate-600">{record.prn}</td>
+                        <td className="px-4 py-3 text-slate-600">{record.subject}</td>
+                        <td className="px-4 py-3 text-slate-600">
+                          <div className="font-medium text-slate-900">{record.dateMarked}</div>
+                          <div className="text-xs text-slate-500">{record.dayMarked}</div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 flex items-center gap-2">
+                          <Clock size={16} className="text-primary-600" />
+                          {record.timeMarked}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="badge badge-success">✓ Present</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
-            <input type="time" required value={newClass.start} onChange={(e) => setNewClass({...newClass, start: e.target.value})} style={{ padding: '10px' }} title="Start Time" />
-            <input type="time" required value={newClass.end} onChange={(e) => setNewClass({...newClass, end: e.target.value})} style={{ padding: '10px' }} title="End Time" />
-            <button type="submit" style={{ padding: '10px 20px', backgroundColor: '#2196F3', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Save Class</button>
-          </form>
-          <p style={{ color: timetableMsg.includes('✅') ? 'green' : 'red', fontWeight: 'bold', height: '20px' }}>{timetableMsg}</p>
+        {/* --- TIMETABLE TAB --- */}
+        {activeTab === 'timetable' && (
+          <div className="space-y-6">
+            {/* Batch Selector */}
+            <div className="flex items-center gap-4">
+              <label className="font-semibold text-slate-900">Select Batch:</label>
+              <select
+                value={newClass.batch}
+                onChange={(e) => setNewClass({ ...newClass, batch: e.target.value })}
+                className="input w-48"
+              >
+                <option value="A">Batch A</option>
+                <option value="B">Batch B</option>
+                <option value="C">Batch C</option>
+                <option value="D">Batch D</option>
+              </select>
+            </div>
 
-          <h3 style={{ marginTop: '30px', borderBottom: '2px solid #ddd', paddingBottom: '10px' }}>Live Schedule for Batch {batch}</h3>
-          {schedule.length === 0 ? <p>No classes scheduled.</p> : (
-            <ul style={{ listStyleType: 'none', padding: 0 }}>
-             {schedule.map((cls, idx) => (
-                <li key={idx} style={{ padding: '15px', backgroundColor: 'white', marginBottom: '10px', borderRadius: '5px', display: 'flex', justifyContent: 'space-between', boxShadow: '0px 2px 5px rgba(0,0,0,0.05)' }}>
-                  <span style={{ fontWeight: 'bold', fontSize: '16px' }}>{cls.subject}</span>
-                  {/* Now showing the Day next to the time! */}
-                  <span style={{ color: '#555' }}>📅 {cls.day} | 🕒 {cls.start} - {cls.end}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+            {/* Add Class Form */}
+            <div className="card">
+              <h3 className="text-xl font-semibold mb-6 text-slate-900 flex items-center gap-2">
+                <Plus size={24} className="text-primary-600" />
+                Add New Class
+              </h3>
+
+              <form onSubmit={handleAddClass} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Subject Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Mathematics"
+                      required
+                      value={newClass.subject}
+                      onChange={(e) =>
+                        setNewClass({ ...newClass, subject: e.target.value })
+                      }
+                      className="input"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Day
+                    </label>
+                    <select
+                      value={newClass.day}
+                      onChange={(e) => setNewClass({ ...newClass, day: e.target.value })}
+                      className="input"
+                    >
+                      {days.map((day) => (
+                        <option key={day} value={day}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Start Time
+                    </label>
+                    <input
+                      type="time"
+                      required
+                      value={newClass.start}
+                      onChange={(e) =>
+                        setNewClass({ ...newClass, start: e.target.value })
+                      }
+                      className="input"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      End Time
+                    </label>
+                    <input
+                      type="time"
+                      required
+                      value={newClass.end}
+                      onChange={(e) => setNewClass({ ...newClass, end: e.target.value })}
+                      className="input"
+                    />
+                  </div>
+                </div>
+
+                <button type="submit" className="btn btn-primary w-full">
+                  Save Class
+                </button>
+              </form>
+
+              {timetableMsg && (
+                <p
+                  className={`mt-4 text-center font-medium ${
+                    timetableMsg.includes('✅') ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {timetableMsg}
+                </p>
+              )}
+            </div>
+
+            {/* Schedule Display */}
+            <div className="space-y-4">
+              <h3 className="text-xl font-semibold text-slate-900">Schedule for Batch {batch}</h3>
+
+              {schedule.length === 0 ? (
+                <div className="card text-center py-12">
+                  <Calendar className="mx-auto mb-4 text-slate-400" size={40} />
+                  <p className="text-slate-600">No classes scheduled</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {schedule.map((cls, idx) => (
+                    <div key={idx} className="card border-l-4 border-l-primary-600 hover:shadow-md-soft transition-shadow">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h4 className="font-bold text-lg text-slate-900">{cls.subject}</h4>
+                          <p className="text-sm text-slate-600">{cls.day}</p>
+                        </div>
+                      <button 
+                        onClick={() => setClassToDelete(cls._id)}
+                        title="Delete Class"
+                        className="p-2 hover:bg-red-50 rounded-lg text-red-600 transition-colors"
+                      >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 text-primary-600 font-semibold">
+                        <Clock size={18} />
+                        <span>
+                          {cls.start} - {cls.end}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {classToDelete && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-red-100 p-2 rounded-full">
+                <AlertCircle className="text-red-600" size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">Delete Class</h3>
+            </div>
+            <p className="text-slate-600 mb-6">
+              Are you sure you want to delete this class? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setClassToDelete(null)} 
+                className="btn btn-outline text-slate-700 border-slate-300 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleDeleteClass} 
+                className="btn bg-red-600 hover:bg-red-700 text-white border-0"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

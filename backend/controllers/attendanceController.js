@@ -122,6 +122,8 @@ const getAttendanceByBatch = async (req, res) => {
             prn: record.studentId.prn,
             subject: record.subject,
             timeMarked: record.date.toLocaleTimeString(),
+            dateMarked: record.date.toLocaleDateString(),
+            dayMarked: record.date.toLocaleDateString('en-US', { weekday: 'long' }),
             status: record.status
         }));
 

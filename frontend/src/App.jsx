@@ -3,48 +3,149 @@ import Dashboard from './pages/Dashboard';
 import Register from './pages/Register';
 import Login from './pages/Login';
 import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import { Menu, X, LogOut, Settings } from 'lucide-react';
+import { useState } from 'react';
 
 // --- THE FRONTEND BOUNCER ---
-// This wrapper prevents unauthorized access to specific pages
 const ProtectedRoute = ({ children }) => {
   const isAuthenticated = !!localStorage.getItem('teacherToken');
-  
-  // If they have the token, render the page. If not, kick them to /login!
   return isAuthenticated ? children : <Navigate to="/login" />;
 };
 
-// --- DYNAMIC NAVIGATION BAR ---
+// --- MODERN NAVIGATION BAR ---
 const Navigation = () => {
   const navigate = useNavigate();
-  const location = useLocation(); 
+  const location = useLocation();
   const isLoggedIn = !!localStorage.getItem('teacherToken');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const teacherEmail = localStorage.getItem('teacherEmail');
 
   const handleLogout = () => {
     localStorage.removeItem('teacherToken');
     localStorage.removeItem('teacherEmail');
-    navigate('/'); 
-    window.location.reload(); 
+    navigate('/');
+    window.location.reload();
   };
 
+  const navLinks = [
+    { path: '/register', label: '+ Register Student', icon: '📝' },
+    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
+  ];
+
   return (
-    <nav style={{ padding: '15px 30px', background: '#282c34', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <div>
-        <Link to="/" style={{ color: 'white', marginRight: '20px', textDecoration: 'none', fontWeight: 'bold', fontSize: '1.2rem' }}>📸 Smart Kiosk</Link>
-      </div>
-      
-      <div>
-        {!isLoggedIn ? (
-          // Public View (Only show the login button if we are NOT on the login page!)
-          location.pathname !== '/login' && (
-            <Link to="/login" style={{ color: '#61dafb', textDecoration: 'none', fontWeight: 'bold' }}>Teacher Login</Link>
-          )
-        ) : (
-          // Private View
-          <>
-            <Link to="/register" style={{ color: 'white', marginRight: '20px', textDecoration: 'none', borderBottom: location.pathname === '/register' ? '2px solid white' : 'none' }}>+ Register Student</Link>
-            <Link to="/dashboard" style={{ color: 'white', marginRight: '20px', textDecoration: 'none', borderBottom: location.pathname === '/dashboard' ? '2px solid white' : 'none' }}>Dashboard</Link>
-            <button onClick={handleLogout} style={{ background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}>Logout</button>
-          </>
+    <nav className="sticky top-0 z-50 bg-gradient-to-r from-primary-700 to-secondary-700 shadow-lg-soft">
+      <div className="container-max">
+        <div className="flex justify-between items-center py-4">
+          {/* Logo */}
+          <Link
+            to="/"
+            className="flex items-center gap-3 text-white font-bold text-xl hover:opacity-90 transition-opacity"
+          >
+            <div className="bg-white rounded-lg p-2">
+              <span className="text-2xl">📸</span>
+            </div>
+            <span>Smart Attendance</span>
+          </Link>
+
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center gap-8">
+            {!isLoggedIn ? (
+              location.pathname !== '/login' && (
+                <Link
+                  to="/login"
+                  className="text-white hover:bg-white/20 px-4 py-2 rounded-lg transition-all duration-200"
+                >
+                  🔒 Teacher Login
+                </Link>
+              )
+            ) : (
+              <>
+                {navLinks.map((link) => (
+                  <Link
+                    key={link.path}
+                    to={link.path}
+                    className={`px-4 py-2 rounded-lg transition-all duration-200 flex items-center gap-2 ${
+                      location.pathname === link.path
+                        ? 'bg-white text-primary-700 font-semibold'
+                        : 'text-white hover:bg-white/20'
+                    }`}
+                  >
+                    <span>{link.icon}</span>
+                    <span>{link.label}</span>
+                  </Link>
+                ))}
+
+                {/* User Profile Dropdown */}
+                <div className="flex items-center gap-4 pl-4 border-l border-white/30">
+                  <div className="text-right">
+                    <p className="text-sm text-white/80">Teacher</p>
+                    <p className="text-sm font-medium text-white truncate max-w-xs">{teacherEmail}</p>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-2 rounded-lg hover:bg-red-500/20 transition-all duration-200 text-white"
+                    title="Logout"
+                  >
+                    <LogOut size={20} />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden text-white"
+          >
+            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+        </div>
+
+        {/* Mobile Navigation */}
+        {mobileMenuOpen && (
+          <div className="md:hidden pb-4 border-t border-white/20 mt-4 pt-4 space-y-2">
+            {!isLoggedIn ? (
+              location.pathname !== '/login' && (
+                <Link
+                  to="/login"
+                  className="block text-white hover:bg-white/20 px-4 py-2 rounded-lg transition-all"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  🔒 Teacher Login
+                </Link>
+              )
+            ) : (
+              <>
+                {navLinks.map((link) => (
+                  <Link
+                    key={link.path}
+                    to={link.path}
+                    className={`block px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
+                      location.pathname === link.path
+                        ? 'bg-white text-primary-700 font-semibold'
+                        : 'text-white hover:bg-white/20'
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <span>{link.icon}</span>
+                    <span>{link.label}</span>
+                  </Link>
+                ))}
+                <button
+                  onClick={() => {
+                    handleLogout();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left px-4 py-2 rounded-lg text-white hover:bg-red-500/20 transition-all flex items-center gap-2"
+                >
+                  <LogOut size={20} />
+                  <span>Logout</span>
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
     </nav>
@@ -55,31 +156,29 @@ const Navigation = () => {
 function App() {
   return (
     <BrowserRouter>
+      <Toaster position="top-right" />
       <Navigation />
-      
+
       <Routes>
-        {/* KIOSK IS NOW THE FIRST PAGE */}
         <Route path="/" element={<Kiosk />} />
-        
         <Route path="/login" element={<Login />} />
-        
-        {/* --- LOCKED ROUTES --- */}
-        <Route 
-          path="/register" 
+
+        <Route
+          path="/register"
           element={
             <ProtectedRoute>
               <Register />
             </ProtectedRoute>
-          } 
+          }
         />
-        
-        <Route 
-          path="/dashboard" 
+
+        <Route
+          path="/dashboard"
           element={
             <ProtectedRoute>
               <Dashboard />
             </ProtectedRoute>
-          } 
+          }
         />
       </Routes>
     </BrowserRouter>
