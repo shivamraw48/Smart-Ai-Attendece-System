@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 // A helper function to generate the VIP Wristband (JWT)
 // It takes the Teacher's database ID and signs it with a secret key
 const generateToken = (id) => {
-    return jwt.sign({ id }, 'my_super_secret_jwt_key_123', {
+    return jwt.sign({ id }, process.env.JWT_SECRET, {
         expiresIn: '30d', // The wristband expires in 30 days
     });
 };

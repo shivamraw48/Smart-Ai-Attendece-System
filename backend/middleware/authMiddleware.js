@@ -11,7 +11,7 @@ const protect = async (req, res, next) => {
             token = req.headers.authorization.split(' ')[1];
 
             // 2. Verify the wristband is real using our secret key
-            const decoded = jwt.verify(token, 'my_super_secret_jwt_key_123');
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
             // 3. Find the teacher in the database using the ID hidden inside the token
             // .select('-password') means "get the teacher data, but DO NOT return the password"
