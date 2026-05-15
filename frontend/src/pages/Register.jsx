@@ -1,273 +1,186 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import axios from 'axios';
-import { Camera, Upload, CheckCircle, AlertCircle, Loader } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { UserPlus, Camera, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 
 const Register = () => {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-
   const [formData, setFormData] = useState({ name: '', prn: '', batch: 'A' });
   const [status, setStatus] = useState('Loading AI Models...');
   const [isReady, setIsReady] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
-  const [currentStep, setCurrentStep] = useState(1);
-  const [faceQuality, setFaceQuality] = useState(null);
-  const [capturedFace, setCapturedFace] = useState(false);
 
-  // Load Models & Start Webcam
+  // 1. Load AI Models and Start Camera
   useEffect(() => {
-    const init = async () => {
+    const loadModelsAndStartCamera = async () => {
       try {
-        setStatus('📦 Loading AI Models...');
         const MODEL_URL = '/models';
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
           faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
         ]);
-
-        setStatus('🎥 Starting Camera...');
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        
+        setStatus('Models loaded. Starting camera...');
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 720, height: 560 } });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          setIsReady(true);
+          setStatus('Ready to register. Look at the camera and fill out the form.');
         }
-
-        setStatus('✅ Ready for Registration');
-        setIsReady(true);
-      } catch (error) {
-        setStatus('❌ Error loading camera or models');
+      } catch (err) {
+        setStatus('❌ Error loading models or accessing camera.');
+        console.error(err);
       }
     };
-    init();
 
+    loadModelsAndStartCamera();
+
+    // Cleanup function to stop the camera when leaving the page
     return () => {
       if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
 
-  // Monitor face quality in real-time
-  const monitorFaceQuality = async () => {
+  // 2. Handle the Registration Process
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setStatus('Scanning face...');
+
     if (!videoRef.current) return;
 
-    const interval = setInterval(async () => {
-      const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
+    // Detect the face and get the 128-point descriptor
+    const detection = await faceapi.detectSingleFace(
+      videoRef.current,
+      new faceapi.TinyFaceDetectorOptions()
+    ).withFaceLandmarks().withFaceDescriptor();
 
-      if (detection) {
-        const box = detection.detection.box;
-        const videoWidth = videoRef.current.offsetWidth;
-        const videoHeight = videoRef.current.offsetHeight;
-
-        // Calculate face position quality (centered = better)
-        const centerX = box.x + box.width / 2;
-        const centerY = box.y + box.height / 2;
-        const distFromCenterX = Math.abs(centerX - videoWidth / 2);
-        const distFromCenterY = Math.abs(centerY - videoHeight / 2);
-        const quality = Math.max(
-          0,
-          100 - (distFromCenterX + distFromCenterY) / (videoWidth + videoHeight) * 200
-        );
-
-        setFaceQuality(Math.round(quality));
-      } else {
-        setFaceQuality(0);
-      }
-    }, 500);
-
-    return () => clearInterval(interval);
-  };
-
-  useEffect(() => {
-    if (currentStep === 2 && isReady) {
-      return monitorFaceQuality();
+    if (!detection) {
+      setStatus('❌ No face detected. Please look directly at the camera.');
+      return;
     }
-  }, [currentStep, isReady]);
 
-  const validateForm = () => {
-    const newErrors = {};
-    if (!formData.name.trim()) newErrors.name = 'Name is required';
-    if (!formData.prn.trim()) newErrors.prn = 'PRN is required';
-    if (formData.prn.trim().length < 5) newErrors.prn = 'PRN must be at least 5 characters';
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleNextStep = () => {
-    if (validateForm()) {
-      setCurrentStep(2);
-    }
-  };
-
-  const handleCaptureFace = async () => {
-    if (!videoRef.current) return;
-
-    setLoading(true);
-    setStatus('📸 Scanning face...');
+    // Convert Float32Array to standard array for MongoDB
+    const descriptorArray = Array.from(detection.descriptor);
 
     try {
-      const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-
-      if (!detection) {
-        toast.error('❌ No face detected. Look straight at the camera');
-        setStatus('❌ No face detected');
-        setLoading(false);
-        return;
-      }
-
-      // Draw face to canvas for preview
-      const displaySize = { width: videoRef.current.width, height: videoRef.current.height };
-      faceapi.matchDimensions(canvasRef.current, displaySize);
-      const resizedDetection = faceapi.resizeResults(detection, displaySize);
-
-      canvasRef.current.getContext('2d').clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      faceapi.draw.drawDetections(canvasRef.current, resizedDetection);
-
-      setCapturedFace(true);
-      const descriptorArray = Array.from(detection.descriptor);
-
-      setStatus('💾 Registering student...');
-
+      // --- SECURE API CALL ---
       const token = localStorage.getItem('teacherToken');
       const config = {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` }
       };
 
-      const response = await axios.post(
-        'http://localhost:5000/api/students/register',
-        {
-          name: formData.name,
-          prn: formData.prn.toUpperCase(),
-          batch: formData.batch,
-          faceDescriptor: descriptorArray,
-        },
-        config
-      );
+      const response = await axios.post('http://localhost:5000/api/students/register', {
+        name: formData.name,
+        prn: formData.prn,
+        batch: formData.batch,
+        faceDescriptor: descriptorArray
+      }, config);
 
-      toast.success(`✅ ${response.data.student.name} registered successfully!`);
       setStatus(`✅ Success! ${response.data.student.name} is registered.`);
-      setFormData({ name: '', prn: '', batch: 'A' });
-      setCurrentStep(3);
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || error.message;
-      toast.error(`❌ ${errorMsg}`);
-      setStatus(`❌ Error: ${errorMsg}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setFormData({ name: '', prn: '', batch: 'A' }); // Reset form
 
-  const handleReset = () => {
-    setCurrentStep(1);
-    setFormData({ name: '', prn: '', batch: 'A' });
-    setCapturedFace(false);
-    setErrors({});
+    } catch (error) {
+      setStatus('❌ Error: ' + (error.response?.data?.message || 'Failed to register student.'));
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8 px-4">
-      <div className="container-max max-w-4xl">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-8">
+      <div className="max-w-5xl mx-auto space-y-8">
         {/* Header */}
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center justify-center gap-3 mb-4 bg-gradient-primary rounded-full px-6 py-3">
-            <Camera className="text-white" size={24} />
-            <h1 className="text-3xl font-bold text-white">Student Registration</h1>
+        <div className="flex items-center gap-3">
+          <div className="bg-primary-600 p-3 rounded-xl shadow-sm">
+            <UserPlus className="text-white" size={28} />
           </div>
-          <p className="text-slate-600">Add new students with face recognition</p>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Student Registration</h1>
+            <p className="text-slate-600">Register new students with facial recognition</p>
+          </div>
         </div>
 
-        {/* Progress Steps */}
-        <div className="flex gap-4 mb-12">
-          {[1, 2, 3].map((step) => (
-            <div key={step} className="flex-1">
-              <div
-                className={`flex items-center justify-center h-12 rounded-lg font-semibold transition-all ${
-                  step === currentStep
-                    ? 'bg-primary-600 text-white shadow-lg'
-                    : step < currentStep
-                    ? 'bg-green-500 text-white'
-                    : 'bg-slate-200 text-slate-600'
-                }`}
-              >
-                {step < currentStep ? <CheckCircle size={20} /> : `Step ${step}`}
-              </div>
-              <p className="text-center text-sm mt-2 text-slate-600">
-                {step === 1 ? 'Student Info' : step === 2 ? 'Face Scan' : 'Complete'}
-              </p>
+        {/* Status Alert */}
+        {status && (
+          <div className={`p-4 rounded-xl border flex items-center gap-3 shadow-sm-soft ${
+            status.includes('❌') ? 'bg-red-50 border-red-200 text-red-700' :
+            status.includes('✅') ? 'bg-green-50 border-green-200 text-green-700' :
+            'bg-blue-50 border-blue-200 text-blue-700'
+          }`}>
+            {status.includes('❌') ? <AlertCircle size={24} /> :
+             status.includes('✅') ? <CheckCircle size={24} /> :
+             <Loader2 className="animate-spin" size={24} />}
+            <span className="font-medium">{status.replace(/[❌✅]/g, '').trim()}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Camera Section */}
+          <div className="card flex flex-col items-center justify-center min-h-[450px]">
+            <div className="w-full flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <Camera className="text-primary-600" size={20} />
+                Live Camera Feed
+              </h3>
+              <span className="relative flex h-3 w-3">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isReady ? 'bg-green-400' : 'bg-amber-400'}`}></span>
+                <span className={`relative inline-flex rounded-full h-3 w-3 ${isReady ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              </span>
             </div>
-          ))}
-        </div>
+            
+            <div className="relative w-full rounded-xl overflow-hidden bg-slate-900 shadow-inner flex items-center justify-center aspect-[4/3]">
+              {!isReady && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-3">
+                  <Loader2 className="animate-spin" size={32} />
+                  <p>Initializing Camera...</p>
+                </div>
+              )}
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                muted 
+                width="720"
+                height="560"
+                className={`w-full h-full object-cover transition-opacity duration-500 ${isReady ? 'opacity-100' : 'opacity-0'}`}
+              />
+            </div>
+          </div>
 
-        {/* Step 1: Form */}
-        {currentStep === 1 && (
-          <div className="card max-w-2xl mx-auto">
-            <h2 className="text-2xl font-bold mb-6 text-slate-900">Student Information</h2>
-
-            <div className="space-y-6">
-              {/* Name Input */}
+          {/* Form Section */}
+          <div className="card">
+            <h3 className="text-xl font-bold text-slate-900 mb-6">Student Details</h3>
+            <form onSubmit={handleRegister} className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="John Doe"
+                <label className="block text-sm font-medium text-slate-700 mb-2">Full Name</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Jane Doe" 
+                  required 
                   value={formData.name}
-                  onChange={(e) => {
-                    setFormData({ ...formData, name: e.target.value });
-                    if (errors.name) setErrors({ ...errors, name: '' });
-                  }}
-                  className={`input ${errors.name ? 'input-error' : ''}`}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="input w-full"
                 />
-                {errors.name && (
-                  <p className="mt-2 flex items-center gap-1 text-sm text-red-600">
-                    <AlertCircle size={16} />
-                    {errors.name}
-                  </p>
-                )}
               </div>
-
-              {/* PRN Input */}
+              
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  PRN (Permanent Registration Number)
-                </label>
-                <input
-                  type="text"
-                  placeholder="PRN12345"
+                <label className="block text-sm font-medium text-slate-700 mb-2">PRN (Registration Number)</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., PRN12345" 
+                  required 
                   value={formData.prn}
-                  onChange={(e) => {
-                    setFormData({ ...formData, prn: e.target.value.toUpperCase() });
-                    if (errors.prn) setErrors({ ...errors, prn: '' });
-                  }}
-                  className={`input ${errors.prn ? 'input-error' : ''}`}
+                  onChange={(e) => setFormData({ ...formData, prn: e.target.value.toUpperCase() })}
+                  className="input w-full font-mono uppercase"
                 />
-                {errors.prn && (
-                  <p className="mt-2 flex items-center gap-1 text-sm text-red-600">
-                    <AlertCircle size={16} />
-                    {errors.prn}
-                  </p>
-                )}
               </div>
 
-              {/* Batch Select */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Batch
-                </label>
-                <select
-                  value={formData.batch}
+                <label className="block text-sm font-medium text-slate-700 mb-2">Assigned Batch</label>
+                <select 
+                  value={formData.batch} 
                   onChange={(e) => setFormData({ ...formData, batch: e.target.value })}
-                  className="input"
+                  className="input w-full bg-white"
                 >
                   <option value="A">Batch A</option>
                   <option value="B">Batch B</option>
@@ -276,158 +189,26 @@ const Register = () => {
                 </select>
               </div>
 
-              {/* Next Button */}
-              <button onClick={handleNextStep} className="btn btn-primary btn-lg w-full">
-                Next: Capture Face
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Face Capture */}
-        {currentStep === 2 && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Video Feed */}
-              <div className="card">
-                <p className="text-sm font-medium text-slate-600 mb-3">Camera Feed</p>
-                <div className="relative bg-black rounded-lg overflow-hidden">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    muted
-                    playsInline
-                    className="w-full aspect-square object-cover"
-                  />
-                  <canvas
-                    ref={canvasRef}
-                    className="absolute top-0 left-0 w-full h-full"
-                  />
-
-                  {/* Face Quality Indicator */}
-                  {faceQuality !== null && (
-                    <div className="absolute bottom-4 left-4 right-4 bg-black/70 rounded-lg p-3">
-                      <p className="text-white text-sm mb-2">Face Quality: {faceQuality}%</p>
-                      <div className="w-full bg-slate-600 rounded-full h-2">
-                        <div
-                          className={`h-2 rounded-full transition-all ${
-                            faceQuality > 70
-                              ? 'bg-green-500'
-                              : faceQuality > 40
-                              ? 'bg-yellow-500'
-                              : 'bg-red-500'
-                          }`}
-                          style={{ width: `${faceQuality}%` }}
-                        ></div>
-                      </div>
-                    </div>
+              <div className="pt-4">
+                <button 
+                  type="submit" 
+                  disabled={!isReady || status.includes('Scanning')}
+                  className={`btn btn-lg w-full flex items-center justify-center gap-2 ${
+                    (!isReady || status.includes('Scanning'))
+                      ? 'bg-slate-300 border-slate-300 text-slate-500 cursor-not-allowed hover:bg-slate-300 hover:border-slate-300'
+                      : 'btn-primary'
+                  }`}
+                >
+                  {status.includes('Scanning') ? (
+                    <><Loader2 className="animate-spin" size={20} /> Processing...</>
+                  ) : (
+                    <><UserPlus size={20} /> Capture & Register</>
                   )}
-                </div>
-
-                {/* Status */}
-                <p className="mt-4 text-center text-sm font-medium text-slate-600">{status}</p>
+                </button>
               </div>
-
-              {/* Instructions */}
-              <div className="space-y-4">
-                <div className="card border-2 border-primary-200 bg-primary-50">
-                  <h3 className="font-semibold text-primary-900 mb-3">📋 Tips for Best Results</h3>
-                  <ul className="space-y-2 text-sm text-primary-800">
-                    <li className="flex gap-2">
-                      <span>✓</span>
-                      <span>Position your face in the center of the frame</span>
-                    </li>
-                    <li className="flex gap-2">
-                      <span>✓</span>
-                      <span>Ensure good lighting on your face</span>
-                    </li>
-                    <li className="flex gap-2">
-                      <span>✓</span>
-                      <span>Look directly at the camera</span>
-                    </li>
-                    <li className="flex gap-2">
-                      <span>✓</span>
-                      <span>Keep your face clearly visible (no obstructions)</span>
-                    </li>
-                    <li className="flex gap-2">
-                      <span>✓</span>
-                      <span>Get quality score above 70% for best recognition</span>
-                    </li>
-                  </ul>
-                </div>
-
-                {/* Student Info Summary */}
-                <div className="card bg-slate-50">
-                  <h3 className="font-semibold mb-3">Student Information</h3>
-                  <div className="space-y-2 text-sm">
-                    <p>
-                      <span className="text-slate-600">Name:</span>
-                      <span className="font-medium ml-2">{formData.name}</span>
-                    </p>
-                    <p>
-                      <span className="text-slate-600">PRN:</span>
-                      <span className="font-medium ml-2">{formData.prn}</span>
-                    </p>
-                    <p>
-                      <span className="text-slate-600">Batch:</span>
-                      <span className="font-medium ml-2">{formData.batch}</span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-4 justify-between">
-              <button
-                onClick={() => setCurrentStep(1)}
-                className="btn btn-outline btn-lg flex-1"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleCaptureFace}
-                disabled={loading || !isReady || faceQuality === null || faceQuality < 40}
-                className="btn btn-primary btn-lg flex-1 flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <Loader className="animate-spin" size={20} />
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Camera size={20} />
-                    <span>Capture & Register</span>
-                  </>
-                )}
-              </button>
-            </div>
+            </form>
           </div>
-        )}
-
-        {/* Step 3: Success */}
-        {currentStep === 3 && (
-          <div className="card max-w-2xl mx-auto text-center">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-6">
-              <CheckCircle className="text-green-600" size={40} />
-            </div>
-            <h2 className="text-3xl font-bold text-slate-900 mb-2">Registration Successful!</h2>
-            <p className="text-slate-600 mb-6">
-              {formData.name} has been registered with face recognition enabled
-            </p>
-
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-8">
-              <p className="text-green-800 font-medium">
-                ✓ Student can now use the Kiosk for attendance marking
-              </p>
-            </div>
-
-            <button onClick={handleReset} className="btn btn-primary btn-lg w-full">
-              Register Another Student
-            </button>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
